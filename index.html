@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TypeMaster - Тренажёр слепой печати (Русский)</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="typing-area">
+            <div class="stats">
+                <div class="stat-card">
+                    <div class="stat-label">Символов/мин</div>
+                    <div class="stat-value" id="wpm">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Точность</div>
+                    <div class="stat-value" id="accuracy">100</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Время</div>
+                    <div class="stat-value" id="timer">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Прогресс</div>
+                    <div class="stat-value" id="progress">0</div>
+                </div>
+            </div>
+
+            <div class="text-container">
+                <div class="reference-text" id="referenceText"></div>
+                <textarea class="user-input" id="userInput" placeholder="Начните печатать здесь... (Русская раскладка)" rows="6"></textarea>
+            </div>
+
+            <div class="controls">
+                <div class="mode-buttons">
+                    <button class="mode-btn active" data-mode="time">На время</button>
+                    <button class="mode-btn" data-mode="accuracy">На точность</button>
+                </div>
+                <select id="difficulty">
+                    <option value="easy">Лёгкий</option>
+                    <option value="medium" selected>Средний</option>
+                    <option value="hard">Сложный</option>
+                </select>
+                <button id="resetBtn">🔄 Новый текст</button>
+                <button id="customTextBtn">✏️ Свой текст</button>
+                <button id="soundToggleBtn">🔊 Звук: Вкл</button>
+            </div>
+
+            <div class="custom-text-area" id="customTextArea" style="display: none;">
+                <label>📝 Введите свой текст на русском:</label>
+                <textarea id="customText" class="custom-text-input" rows="4" placeholder="Вставьте или введите текст для тренировки..."></textarea>
+                <button id="applyCustomText" style="margin-top: 10px;">✅ Применить</button>
+            </div>
+            
+            <div class="info-note">
+                💡 Совет: Для переключения на русскую раскладку используйте Alt + Shift или Win + Пробел. Пробелы отображаются как ␣.
+            </div>
+        </div>
+
+        <div class="chart-area">
+            <canvas id="progressChart"></canvas>
+        </div>
+    </div>
+
+    <script>
+        // Русские тексты по сложности
+        const texts = {
+            easy: [
+                "Мама мыла раму мылом.",
+                "Кошка сидела на окне и смотрела на птиц.",
+                "Солнце светит ярко за окном.",
+                "Дети играют во дворе в футбол.",
+                "Вкусный пирог испекла бабушка."
+            ],
+            medium: [
+                "Программирование это искусство создания программного обеспечения с помощью языков программирования.",
+                "Для того чтобы научиться быстро печатать необходимо регулярно тренироваться каждый день.",
+                "Компьютерные науки это не просто про компьютеры это про решение сложных задач.",
+                "Практика и терпение помогут вам достичь высоких результатов в любом деле.",
+                "Хороший код отличается читаемостью простотой и эффективностью решения поставленной задачи."
+            ],
+            hard: [
+                "В современном цифровом мире навык быстрой и точной печати становится не просто полезным умением а необходимым инструментом для эффективной работы и общения с окружающими.",
+                "Развитие навыка слепой печати требует систематического подхода правильной техники и постоянного самоконтроля фокусируясь на точности прежде чем наращивать скорость.",
+                "Понимание эргономики клавиатуры и правильное позиционирование пальцев значительно увеличивает скорость печати снижая при этом усталость во время длительных сеансов работы за компьютером.",
+                "Современные тренажеры печати используют сложные алгоритмы для анализа ваших ошибок и предоставления персонализированных рекомендаций по улучшению навыков.",
+                "Исследования показывают что люди печатающие слепым методом достигают скорости более трехсот символов в минуту при высокой точности что делает их невероятно продуктивными."
+            ]
+        };
+
+        let currentText = "";
+        let userInput = "";
+        let startTime = null;
+        let timer = null;
+        let isActive = false;
+        let currentMode = "time";
+        let correctChars = 0;
+        let currentCharIndex = 0;
+        let soundEnabled = true;
+        let weeklyStats = JSON.parse(localStorage.getItem('typingStats')) || [];
+        let chart;
+
+        function playSound(type) {
+            if (!soundEnabled) return;
+            const audio = new Audio();
+            if (type === 'correct') {
+                audio.src = 'https://www.soundjay.com/misc/sounds/bell-ringing-05.mp3';
+            } else {
+                audio.src = 'https://www.soundjay.com/misc/sounds/error-01.mp3';
+            }
+            audio.volume = 0.2;
+            audio.play().catch(e => console.log('Звук не воспроизведён:', e));
+        }
+
+        function getRandomText() {
+            const difficulty = document.getElementById('difficulty').value;
+            const textArray = texts[difficulty];
+            return textArray[Math.floor(Math.random() * textArray.length)];
+        }
+
+        function displayText() {
+            const referenceDiv = document.getElementById('referenceText');
+            referenceDiv.innerHTML = '';
+            
+            for (let i = 0; i < currentText.length; i++) {
+                const char = document.createElement('span');
+                const isSpace = currentText[i] === ' ';
+                const isNewline = currentText[i] === '\n';
+                
+                char.className = 'char';
+                if (isSpace) {
+                    char.classList.add('space');
+                    char.textContent = ' ';
+                } else if (isNewline) {
+                    char.textContent = '↵';
+                    char.style.opacity = '0.5';
+                } else {
+                    char.textContent = currentText[i];
+                }
+                
+                if (i === currentCharIndex) {
+                    char.classList.add('current');
+                }
+                if (i < userInput.length) {
+                    if (userInput[i] === currentText[i]) {
+                        char.classList.add('correct');
+                    } else {
+                        char.classList.add('incorrect');
+                    }
+                }
+                referenceDiv.appendChild(char);
+            }
+            
+            updateProgress();
+        }
+
+        function updateProgress() {
+            const progress = (userInput.length / currentText.length) * 100;
+            document.getElementById('progress').textContent = Math.round(progress);
+        }
+
+        function calculateWPM() {
+            if (!startTime) return 0;
+            const minutes = (Date.now() - startTime) / 60000;
+            const charsTyped = correctChars;
+            return Math.round(charsTyped / minutes);
+        }
+
+        function calculateAccuracy() {
+            if (userInput.length === 0) return 100;
+            return Math.round((correctChars / userInput.length) * 100);
+        }
+
+        function updateStats() {
+            document.getElementById('wpm').textContent = calculateWPM();
+            document.getElementById('accuracy').textContent = calculateAccuracy();
+        }
+
+        function checkCompletion() {
+            if (userInput.length === currentText.length && isActive) {
+                const finalWPM = calculateWPM();
+                const finalAccuracy = calculateAccuracy();
+                saveStats(finalWPM, finalAccuracy);
+                stopTimer();
+                isActive = false;
+                setTimeout(() => {
+                    alert(`✨ Отлично! Ваш результат:\n📊 Скорость: ${finalWPM} символов/мин\n🎯 Точность: ${finalAccuracy}%`);
+                }, 100);
+            }
+        }
+
+        function startTimer() {
+            if (timer) clearInterval(timer);
+            startTime = Date.now();
+            timer = setInterval(() => {
+                if (isActive && startTime) {
+                    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+                    document.getElementById('timer').textContent = elapsed;
+                    
+                    if (currentMode === 'time' && elapsed >= 60) {
+                        const finalWPM = calculateWPM();
+                        const finalAccuracy = calculateAccuracy();
+                        saveStats(finalWPM, finalAccuracy);
+                        stopTimer();
+                        isActive = false;
+                        alert(`⏰ Время вышло! Ваш результат:\n📊 Скорость: ${finalWPM} символов/мин\n🎯 Точность: ${finalAccuracy}%`);
+                    }
+                }
+            }, 1000);
+        }
+
+        function stopTimer() {
+            if (timer) {
+                clearInterval(timer);
+                timer = null;
+            }
+        }
+
+        function saveStats(wpm, accuracy) {
+            weeklyStats.push({
+                date: new Date().toISOString(),
+                wpm: wpm,
+                accuracy: accuracy
+            });
+            if (weeklyStats.length > 30) {
+                weeklyStats = weeklyStats.slice(-30);
+            }
+            localStorage.setItem('typingStats', JSON.stringify(weeklyStats));
+            updateChart();
+        }
+
+        function resetTest() {
+            userInput = "";
+            correctChars = 0;
+            currentCharIndex = 0;
+            currentText = getRandomText();
+            
+            if (startTime) {
+                stopTimer();
+                startTime = null;
+            }
+            
+            isActive = false;
+            document.getElementById('userInput').value = "";
+            document.getElementById('timer').textContent = "0";
+            document.getElementById('wpm').textContent = "0";
+            document.getElementById('accuracy').textContent = "100";
+            
+            displayText();
+        }
+
+        function handleInput(e) {
+            const inputValue = e.target.value;
+            
+            if (!isActive && inputValue.length > 0) {
+                isActive = true;
+                startTimer();
+            }
+            
+            if (!isActive) return;
+            
+            userInput = inputValue;
+            
+            correctChars = 0;
+            for (let i = 0; i < userInput.length && i < currentText.length; i++) {
+                if (userInput[i] === currentText[i]) {
+                    correctChars++;
+                }
+            }
+            
+            currentCharIndex = userInput.length;
+            
+            if (userInput.length > 0 && userInput.length <= currentText.length) {
+                const lastChar = userInput[userInput.length - 1];
+                const expectedChar = currentText[userInput.length - 1];
+                
+                if (lastChar === expectedChar) {
+                    playSound('correct');
+                } else {
+                    playSound('error');
+                }
+            }
+            
+            displayText();
+            updateStats();
+            checkCompletion();
+        }
+
+        function initChart() {
+            const ctx = document.getElementById('progressChart').getContext('2d');
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: getLast7Days(),
+                    datasets: [{
+                        label: 'Скорость (символов/мин)',
+                        data: getWeeklyWPM(),
+                        borderColor: '#667eea',
+                        backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                        tension: 0.4,
+                        fill: true
+                    }, {
+                        label: 'Точность (%)',
+                        data: getWeeklyAccuracy(),
+                        borderColor: '#17bf63',
+                        backgroundColor: 'rgba(23, 191, 99, 0.1)',
+                        tension: 0.4,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                        },
+                        title: {
+                            display: true,
+                            text: '📈 Прогресс за последние 7 дней'
+                        }
+                    }
+                }
+            });
+        }
+
+        function getLast7Days() {
+            const days = [];
+            for (let i = 6; i >= 0; i--) {
+                const date = new Date();
+                date.setDate(date.getDate() - i);
+                days.push(date.toLocaleDateString('ru-RU', { weekday: 'short' }));
+            }
+            return days;
+        }
+
+        function getWeeklyWPM() {
+            const weeklyWPM = new Array(7).fill(0);
+            weeklyStats.forEach(stat => {
+                const dayIndex = getDayDifference(stat.date);
+                if (dayIndex >= 0 && dayIndex < 7) {
+                    weeklyWPM[dayIndex] = Math.max(weeklyWPM[dayIndex], stat.wpm);
+                }
+            });
+            return weeklyWPM;
+        }
+
+        function getWeeklyAccuracy() {
+            const weeklyAccuracy = new Array(7).fill(0);
+            weeklyStats.forEach(stat => {
+                const dayIndex = getDayDifference(stat.date);
+                if (dayIndex >= 0 && dayIndex < 7) {
+                    weeklyAccuracy[dayIndex] = Math.max(weeklyAccuracy[dayIndex], stat.accuracy);
+                }
+            });
+            return weeklyAccuracy;
+        }
+
+        function getDayDifference(date) {
+            const today = new Date();
+            const targetDate = new Date(date);
+            const diffTime = today - targetDate;
+            const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+            return 6 - diffDays;
+        }
+
+        function updateChart() {
+            if (chart) {
+                chart.data.datasets[0].data = getWeeklyWPM();
+                chart.data.datasets[1].data = getWeeklyAccuracy();
+                chart.update();
+            }
+        }
+
+        // Обработчики событий
+        document.getElementById('userInput').addEventListener('input', handleInput);
+        document.getElementById('resetBtn').addEventListener('click', () => {
+            resetTest();
+            document.getElementById('userInput').focus();
+        });
+        document.getElementById('difficulty').addEventListener('change', () => resetTest());
+        
+        document.querySelectorAll('.mode-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentMode = btn.dataset.mode;
+                resetTest();
+            });
+        });
+        
+        document.getElementById('customTextBtn').addEventListener('click', () => {
+            const customArea = document.getElementById('customTextArea');
+            customArea.style.display = customArea.style.display === 'none' ? 'block' : 'none';
+        });
+        
+        document.getElementById('applyCustomText').addEventListener('click', () => {
+            const customText = document.getElementById('customText').value;
+            if (customText.trim().length > 0) {
+                currentText = customText;
+                userInput = "";
+                correctChars = 0;
+                currentCharIndex = 0;
+                isActive = false;
+                startTime = null;
+                document.getElementById('userInput').value = "";
+                displayText();
+                document.getElementById('customTextArea').style.display = 'none';
+                document.getElementById('userInput').focus();
+            }
+        });
+        
+        document.getElementById('soundToggleBtn').addEventListener('click', () => {
+            soundEnabled = !soundEnabled;
+            document.getElementById('soundToggleBtn').textContent = soundEnabled ? '🔊 Звук: Вкл' : '🔇 Звук: Выкл';
+        });
+        
+        // Инициализация
+        currentText = getRandomText();
+        displayText();
+        initChart();
+        document.getElementById('userInput').focus();
+        
+        console.log('Тренажёр готов! Используйте русскую раскладку клавиатуры.');
+    </script>
+</body>
+</html>
